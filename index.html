@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Dashboard SPP Ganti Kerugian 2026 Divisi Pendanaan Tanah II</title>
+<script src="vendor/d3.min.js"></script>
+<style>
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-style: normal; font-display: swap; src: url("vendor/fonts/ibm-plex-sans-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 500; font-style: normal; font-display: swap; src: url("vendor/fonts/ibm-plex-sans-latin-500-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 600; font-style: normal; font-display: swap; src: url("vendor/fonts/ibm-plex-sans-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Serif"; font-weight: 400; font-style: normal; font-display: swap; src: url("vendor/fonts/ibm-plex-serif-latin-400-normal.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Serif"; font-weight: 500; font-style: normal; font-display: swap; src: url("vendor/fonts/ibm-plex-serif-latin-500-normal.woff2") format("woff2"); }
+:root {
+  --font-anthropic-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-anthropic-serif: "IBM Plex Serif", Georgia, serif;
+  --color-bg: #FFFFFF;
+  --color-fg: #1A2433;
+  --color-fg-muted: #5B6676;
+  --color-border-line: #DDE2E9;
+  --color-bad: #B42318;
+  --cds-chart-muted: #A9B2BF;
+  --cds-chart-grid: #E7EBF0;
+  --cds-chart-axis: #9AA4B2;
+  --cds-surface-popover: #FFFFFF;
+  --cds-border: #D3D9E1;
+  --cds-shadow-popover: 0 6px 20px rgba(20, 49, 92, .14);
+  --cds-text-secondary: #5B6676;
+  --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 16px; --cds-gap-lg: 24px; --cds-gap-xl: 36px;
+  --cds-pad-xs: 4px; --cds-pad-sm: 8px; --cds-pad-lg: 20px; --cds-pad-xl: 28px;
+  --cds-radius: 6px;
+  --cds-font-size-caption: 0.8125rem;
+  --cds-font-size-body: 1rem;
+  --cds-font-size-heading: 1.1875rem;
+  --cds-font-size-title: 1.875rem;
+  --cds-font-weight-medium: 500;
+  --cds-dur-slow: 240ms;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0F1722;
+    --color-fg: #E6EAF0;
+    --color-fg-muted: #9AA6B6;
+    --color-border-line: #2A3545;
+    --color-bad: #F97066;
+    --cds-chart-muted: #5C6879;
+    --cds-chart-grid: #222C3A;
+    --cds-chart-axis: #4A5568;
+    --cds-surface-popover: #182231;
+    --cds-border: #33404F;
+    --cds-shadow-popover: 0 6px 20px rgba(0, 0, 0, .45);
+    --cds-text-secondary: #9AA6B6;
+  }
+}
+html, body { margin: 0; background: var(--color-bg); color: var(--color-fg); font-family: var(--font-anthropic-sans); }
+#dash-root { padding: var(--cds-gap-lg) 16px var(--cds-gap-xl); }
+@media (min-width: 48rem) { #dash-root { padding-inline: var(--cds-gap-xl); } }
+.dash-skeleton { color: transparent !important; position: relative; min-height: 1em; }
+.dash-skeleton::after { content: ""; position: absolute; inset: 0.15em 0; max-width: 12rem; border-radius: 4px; background: color-mix(in srgb, var(--color-fg) 9%, transparent); }
+.lp-kop .dash-skeleton::after { background: rgba(255,255,255,.18); }
+.lp-foot { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-top: var(--cds-gap-xl); border-top: 1px solid var(--color-border-line); padding-top: var(--cds-pad-sm); max-width: 76rem; margin-inline: auto; }
+</style>
+<script>
+/* Pengganti runtime dashboard Claude: memuat data JSON dan menjalankan rumus yang sama di browser. */
+window.dash = (() => {
+  const SOURCES = { spp: 'data/spp_agregat.json', rkp: 'data/rkp_bulanan.json', info: 'data/info.json' };
+  const raw = {}, calcs = {}, cache = {}, cbs = [];
+  let status = 'loading';
+  let params = { jenis: 'Semua', ruas: 'Semua' };
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.get('jenis')) params.jenis = q.get('jenis');
+    if (q.get('ruas')) params.ruas = q.get('ruas');
+  } catch (e) {}
+  const run = () => cbs.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } });
+  const get = (id) => {
+    if (status !== 'ok') return { status, data: [] };
+    if (id in raw) return { status: 'ok', data: raw[id] };
+    if (id in calcs) {
+      if (!(id in cache)) {
+        const c = calcs[id];
+        cache[id] = c.fn(...c.inputs.map((i) => get(i).data));
+      }
+      return { status: 'ok', data: cache[id] };
+    }
+    return { status: 'missing', data: [] };
+  };
+  const api = {
+    calc(id, o) { calcs[id] = o; },
+    data: get,
+    onData(fn) { cbs.push(fn); try { fn(); } catch (e) { console.error(e); } },
+    params() { return { ...params }; },
+    setParams(o) { params = { ...params, ...o }; run(); },
+    resetParams() { params = { jenis: 'Semua', ruas: 'Semua' }; run(); },
+    colors: ['#14315C', '#B08A3E', '#5B6676', '#7A8FA6', '#2F6F73', '#8C5A6E', '#5E7F3A', '#9A6B2F'],
+    refresh() {}, loader() {}, setLink() {},
+  };
+  Promise.all(Object.entries(SOURCES).map(([id, url]) =>
+    fetch(url + '?v=' + Date.now(), { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error(url); return r.json(); }).then((j) => { raw[id] = j; })
+  )).then(() => { status = 'ok'; run(); }).catch((e) => { console.error(e); status = 'error'; run(); });
+  let t;
+  addEventListener('resize', () => { clearTimeout(t); t = setTimeout(run, 120); });
+  return api;
+})();
+</script>
+</head>
+<body>
+<div id="dash-root">
+<style>
+.dash-skeleton { color: transparent !important; position: relative; min-height: 1em; }
+.lp-kop .dash-skeleton::after { background: rgba(255,255,255,.18); }
+.lp-foot { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); border-top: 1px solid var(--color-border-line); padding-top: var(--cds-pad-sm); margin: 0; }
+.lp-unit { font-size: var(--cds-font-size-caption); color: rgba(255,255,255,.78); margin: 2px 0 0; letter-spacing: .02em; }
+.lp-step-pct { color: var(--color-fg-muted); }
+</style>
+
+<style>
+.lp {
+  --lp-navy: #14315C;
+  --lp-gold: #B08A3E;
+  --lp-setuju: color-mix(in srgb, #1F4E8C 72%, var(--color-fg));
+  --lp-selisih: #B08A3E;
+  --lp-proses: var(--cds-chart-muted);
+  --lp-lain: color-mix(in srgb, var(--color-fg) 30%, transparent);
+  --lp-rule: color-mix(in srgb, #B08A3E 55%, transparent);
+  font-family: var(--font-anthropic-sans);
+  font-variant-numeric: tabular-nums;
+  display: flex; flex-direction: column; gap: var(--cds-gap-xl);
+  max-width: 76rem; margin-inline: auto;
+}
+.lp :focus-visible { outline: 2px solid var(--lp-gold); outline-offset: 2px; }
+
+/* Kop */
+.lp-kop { background: var(--lp-navy); color: #fff; border-radius: var(--cds-radius); padding: var(--cds-pad-lg) var(--cds-pad-xl); display: grid; gap: var(--cds-gap-md); border-bottom: 3px solid var(--lp-gold); }
+.lp-kop-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--cds-gap-md); align-items: baseline; }
+.lp-title { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); line-height: 1.15; margin: 0; letter-spacing: 0.005em; }
+.lp-asof { font-size: var(--cds-font-size-caption); color: rgba(255,255,255,.78); margin: 0; max-width: 34rem; }
+.lp-take { font-size: var(--cds-font-size-body); line-height: 1.55; margin: 0; max-width: 62ch; color: rgba(255,255,255,.94); }
+.lp-filters { display: flex; flex-wrap: wrap; gap: var(--cds-gap-md); align-items: center; }
+.lp-f { display: flex; align-items: center; gap: var(--cds-gap-sm); font-size: var(--cds-font-size-caption); color: rgba(255,255,255,.8); }
+.lp-f select { font: inherit; font-size: var(--cds-font-size-caption); color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.35); border-radius: var(--cds-radius); padding: var(--cds-pad-xs) var(--cds-pad-sm); max-width: min(26rem, 70vw); }
+.lp-f select option { color: #14315C; background: #fff; }
+.lp-seg { display: inline-flex; border: 1px solid rgba(255,255,255,.35); border-radius: var(--cds-radius); overflow: hidden; }
+.lp-seg button { font: inherit; font-size: var(--cds-font-size-caption); color: rgba(255,255,255,.82); background: transparent; border: 0; border-right: 1px solid rgba(255,255,255,.25); padding: var(--cds-pad-xs) var(--cds-pad-sm); cursor: pointer; }
+.lp-seg button:last-child { border-right: 0; }
+.lp-seg button[aria-pressed="true"] { background: #fff; color: var(--lp-navy); font-weight: var(--cds-font-weight-medium); }
+.lp-clear { font: inherit; font-size: var(--cds-font-size-caption); color: var(--lp-navy); background: #fff; border: 0; border-radius: var(--cds-radius); padding: var(--cds-pad-xs) var(--cds-pad-sm); cursor: pointer; }
+.lp-clear[hidden] { display: none; }
+
+/* Neraca angka utama */
+.lp-neraca { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); border-top: 1px solid var(--lp-rule); border-bottom: 1px solid var(--lp-rule); }
+.lp-pos { padding: var(--cds-pad-lg) var(--cds-pad-lg) var(--cds-pad-lg) 0; border-right: 1px solid var(--lp-rule); margin-right: var(--cds-pad-lg); min-width: 0; }
+.lp-pos:last-child { border-right: 0; margin-right: 0; }
+.lp-pos-name { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); display: flex; align-items: center; gap: var(--cds-gap-xs); }
+.lp-pos-name i { width: 0.625rem; height: 0.625rem; border-radius: 2px; display: inline-block; }
+.lp-pos-val { font-size: calc(var(--cds-font-size-title) * 1.15); font-weight: 600; letter-spacing: -0.01em; margin: var(--cds-gap-xs) 0 2px; line-height: 1.1; }
+.lp-pos-sub { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+
+/* Bagian */
+.lp-duo { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr)); gap: var(--cds-gap-xl); }
+.lp-sec { min-width: 0; }
+.lp-h { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-heading); margin: 0 0 2px; padding-bottom: var(--cds-pad-xs); border-bottom: 1px solid var(--color-border-line); }
+.lp-note { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin: var(--cds-gap-xs) 0 var(--cds-gap-md); max-width: 70ch; line-height: 1.5; }
+.lp-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin-bottom: var(--cds-gap-sm); }
+.lp-legend span { display: inline-flex; align-items: center; gap: var(--cds-gap-xs); }
+.lp-legend i { width: 0.625rem; height: 0.625rem; border-radius: 2px; display: inline-block; }
+
+/* Pipeline bernomor */
+.lp-tahap { display: grid; grid-template-columns: minmax(7rem, auto) 1fr; gap: var(--cds-gap-lg); align-items: center; margin-top: calc(-1 * var(--cds-gap-md)); padding-bottom: var(--cds-pad-lg); border-bottom: 1px solid var(--lp-rule); }
+.lp-tahap-h { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-heading); margin: 0; }
+.lp-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--cds-gap-lg); min-height: 1.75rem; }
+.lp-step { display: grid; grid-template-columns: 1.75rem 7.25rem 1fr; gap: var(--cds-gap-sm); align-items: center; font-size: var(--cds-font-size-caption); }
+.lp-step b { width: 1.5rem; height: 1.5rem; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--lp-gold); color: var(--color-fg); font-weight: 500; font-size: 0.75rem; }
+.lp-step-name { color: var(--color-fg); }
+.lp-step-bar { position: relative; height: 1.5rem; background: color-mix(in srgb, var(--color-fg) 6%, transparent); border-radius: 4px; }
+.lp-step-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--lp-setuju); }
+.lp-step-val { white-space: nowrap; color: var(--color-fg-muted); margin-left: var(--cds-gap-xs); min-width: 5.75rem; text-align: right; }
+.lp-step-row { display: flex; align-items: center; gap: var(--cds-gap-sm); }
+.lp-step-row .lp-step-bar { flex: 1; }
+
+.lp-chart { position: relative; min-height: 18rem; }
+.lp-ruas { position: relative; min-height: 20rem; }
+.lp-ruas .row { cursor: pointer; }
+.lp-tt { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); max-width: 20rem; z-index: 2; display: none; }
+.lp-tt .t { color: var(--cds-text-secondary); margin-bottom: 2px; }
+.lp-tt .r { display: flex; gap: var(--cds-gap-xs); align-items: center; }
+.lp-tt .r i { width: 0.5rem; height: 0.5rem; border-radius: 2px; display: inline-block; }
+
+/* Tabel */
+.lp-tbox { max-height: 30rem; overflow: auto; }
+.lp-table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); }
+.lp-table th { position: sticky; top: 0; background: var(--color-bg); text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--lp-rule); white-space: nowrap; }
+.lp-table th button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.lp-table th.num, .lp-table td.num { text-align: right; white-space: nowrap; }
+.lp-table td { padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); }
+.lp-table tbody tr { cursor: pointer; }
+.lp-table tbody tr:hover { background: color-mix(in srgb, var(--color-fg) 4%, transparent); }
+.lp-table tbody tr[aria-selected="true"] { background: color-mix(in srgb, #1F4E8C 12%, transparent); box-shadow: inset 3px 0 0 var(--lp-gold); }
+
+[data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+[data-dash-source-state=empty] { color: transparent; }
+.lp-fail { display: flex; align-items: center; justify-content: center; gap: var(--cds-gap-xs); color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); min-height: inherit; }
+.lp-fail::before { content: ""; width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--color-bad); }
+@media (max-width: 40rem) {
+  .lp-kop { padding: var(--cds-pad-lg); }
+  .lp-pos { border-right: 0; margin-right: 0; border-bottom: 1px solid var(--lp-rule); padding-right: 0; }
+  .lp-pos:last-child { border-bottom: 0; }
+  .lp-tahap { grid-template-columns: 1fr; gap: var(--cds-gap-sm); }
+  .lp-steps { grid-template-columns: 1fr; gap: var(--cds-gap-sm); }
+  .lp-step { grid-template-columns: 1.75rem 1fr; }
+  .lp-step-row { grid-column: 1 / -1; }
+}
+</style>
+
+<div class="lp">
+  <header class="lp-kop" id="ringkasan">
+    <div class="lp-kop-top">
+      <div><h1 class="lp-title" id="judul">Laporan SPP Ganti Kerugian 2026</h1><p class="lp-unit">Divisi Pendanaan Tanah II</p></div>
+      <div class="lp-asof">Data dari <span class="dash-skeleton" id="lp-asof" data-source="info" data-field="file" data-row="0">—</span><br><span id="lp-asof-ket"></span></div>
+    </div>
+    <p class="lp-take dash-skeleton" id="lp-take" data-source="ringkasan">—</p>
+    <div class="lp-filters">
+      <label class="lp-f">Ruas
+        <select id="lp-ruas" aria-label="Pilih ruas PSN" data-source="per_psn"></select>
+      </label>
+      <div class="lp-f">Jenis
+        <div class="lp-seg" id="lp-jenis" role="group" aria-label="Pilih jenis pengajuan">
+          <button type="button" data-j="Semua">Semua</button>
+          <button type="button" data-j="Langsung">Langsung</button>
+          <button type="button" data-j="DTT">DTT</button>
+          <button type="button" data-j="CoF">CoF</button>
+        </div>
+      </div>
+      <button type="button" class="lp-clear" id="lp-clear" hidden>Tampilkan semua ruas</button>
+    </div>
+  </header>
+
+  <section class="lp-neraca" id="neraca" aria-label="Angka utama">
+    <div class="lp-pos">
+      <div class="lp-pos-name">Nilai diajukan</div>
+      <div class="lp-pos-val dash-skeleton" id="k-diajukan" data-source="ringkasan" data-field="nilai_diajukan">—</div>
+      <div class="lp-pos-sub"><span id="k-spp" data-source="ringkasan" data-field="jml_spp">—</span> SPP, <span id="k-bid" data-source="ringkasan" data-field="bidang">—</span> bidang</div>
+    </div>
+    <div class="lp-pos">
+      <div class="lp-pos-name"><i style="background: var(--lp-setuju)"></i>Disetujui (RKP)</div>
+      <div class="lp-pos-val dash-skeleton" id="k-setuju" data-source="ringkasan" data-field="nilai_disetujui">—</div>
+      <div class="lp-pos-sub"><span id="k-pct" data-source="ringkasan" data-field="pct_disetujui">—</span> dari nilai SPP yang selesai dinilai</div>
+    </div>
+    <div class="lp-pos">
+      <div class="lp-pos-name"><i style="background: var(--lp-selisih)"></i>Selisih, tidak disetujui</div>
+      <div class="lp-pos-val dash-skeleton" id="k-selisih" data-source="ringkasan" data-field="selisih">—</div>
+      <div class="lp-pos-sub"><span id="k-nol" data-source="ringkasan" data-field="jml_disetujui_nol">—</span> SPP selesai disetujui Rp0</div>
+    </div>
+    <div class="lp-pos">
+      <div class="lp-pos-name"><i style="background: var(--lp-proses)"></i>Masih diproses (ADM)</div>
+      <div class="lp-pos-val dash-skeleton" id="k-adm" data-source="ringkasan" data-field="nilai_adm">—</div>
+      <div class="lp-pos-sub"><span id="k-admn" data-source="ringkasan" data-field="jml_adm">—</span> SPP belum selesai</div>
+    </div>
+  </section>
+
+  <section class="lp-tahap" id="pipeline" aria-label="Tahapan SPP">
+    <h2 class="lp-tahap-h">Tahapan SPP</h2>
+    <ol class="lp-steps dash-skeleton" id="lp-steps" data-source="ringkasan"></ol>
+  </section>
+
+  <section class="lp-sec" id="bulanan">
+    <h2 class="lp-h">Arus nilai per bulan</h2>
+    <p class="lp-note">Nilai diajukan menurut bulan tanggal SPP; nilai disetujui menurut bulan terbit RKP.</p>
+    <div class="lp-legend" id="lp-bul-leg"></div>
+    <div class="lp-chart dash-skeleton" id="lp-bul" data-source="per_bulan"></div>
+  </section>
+
+  <section class="lp-sec" id="per-ruas">
+    <h2 class="lp-h">Nilai per ruas PSN</h2>
+    <p class="lp-note">Klik batang untuk melihat satu ruas; klik lagi untuk kembali ke semua ruas. Urut dari nilai diajukan terbesar.</p>
+    <div class="lp-legend" id="lp-ruas-leg"></div>
+    <div class="lp-ruas dash-skeleton" id="lp-ruas-chart" data-source="per_psn"></div>
+  </section>
+
+  <section class="lp-sec" id="rincian">
+    <h2 class="lp-h">Rincian per ruas PSN</h2>
+    <p class="lp-note">Klik judul kolom untuk mengurutkan, atau klik baris untuk memilih ruas. Persentase disetujui = nilai disetujui ÷ nilai diajukan SPP yang sudah selesai dinilai.</p>
+    <div class="lp-tbox">
+      <table class="lp-table" id="lp-tabel" data-source="per_psn" data-row-key="jenis,psn">
+        <thead><tr>
+          <th data-field="psn"><button type="button" data-k="psn">Ruas PSN</button></th>
+          <th class="num" data-field="jml_spp"><button type="button" data-k="jml_spp">SPP</button></th>
+          <th class="num" data-field="nilai_diajukan"><button type="button" data-k="nilai_diajukan">Diajukan (Rp)</button></th>
+          <th class="num" data-field="nilai_disetujui"><button type="button" data-k="nilai_disetujui">Disetujui (Rp)</button></th>
+          <th class="num" data-field="selisih"><button type="button" data-k="selisih">Selisih (Rp)</button></th>
+          <th class="num" data-field="pct_disetujui"><button type="button" data-k="pct_disetujui">% disetujui</button></th>
+          <th class="num" data-field="nilai_adm"><button type="button" data-k="nilai_adm">Diproses (Rp)</button></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+dash.calc('ringkasan', {
+  title: 'Ringkasan per jenis dan ruas',
+  description: 'Untuk tiap jenis (dan Semua) dan tiap ruas (dan Semua): nilai diajukan, disetujui, selisih SPP selesai, nilai masih diproses, dan jumlah SPP per tahap.',
+  inputs: ['spp'],
+  fn: (spp) => {
+    const out = [];
+    const ruasList = ['Semua', ...[...new Set(spp.map((x) => x.psn))].sort()];
+    ['Semua', 'Langsung', 'DTT', 'CoF'].forEach((j) => {
+      ruasList.forEach((p) => {
+        const r = spp.filter((x) => (j === 'Semua' || x.jenis === j) && (p === 'Semua' || x.psn === p));
+        const sum = (rows, f) => rows.reduce((a, x) => a + Number(x[f] || 0), 0);
+        const sel = r.filter((x) => x.status === 'Selesai');
+        const adm = r.filter((x) => x.status === 'ADM');
+        const vs = sum(r, 'nilai_diajukan_selesai');
+        const v2 = sum(r, 'nilai_disetujui');
+        out.push({
+          jenis: j, ruas: p,
+          jml_spp: sum(r, 'jml_spp'),
+          nilai_diajukan: sum(r, 'nilai_diajukan'),
+          bidang: sum(r, 'bidang'),
+          jml_selesai: sum(sel, 'jml_spp'),
+          nilai_disetujui: v2,
+          selisih: vs - v2,
+          pct_disetujui: vs ? v2 / vs : null,
+          jml_disetujui_nol: sum(r, 'jml_disetujui_nol'),
+          jml_adm: sum(adm, 'jml_spp'),
+          nilai_adm: sum(adm, 'nilai_diajukan'),
+          jml_rkp: sum(r, 'jml_rkp'),
+          jml_spers: sum(r, 'jml_spers'),
+          jml_sp2d: sum(r, 'jml_sp2d'),
+        });
+      });
+    });
+    return out;
+  },
+});
+
+dash.calc('per_psn', {
+  title: 'Nilai per ruas PSN',
+  description: 'Untuk tiap jenis (dan Semua) dan ruas: SPP, nilai diajukan, disetujui, selisih SPP selesai, nilai masih diproses (ADM), dan nilai SPP selesai yang belum dinilai (diganti).',
+  inputs: ['spp'],
+  fn: (spp) => {
+    const out = [];
+    ['Semua', 'Langsung', 'DTT', 'CoF'].forEach((j) => {
+      const r = spp.filter((x) => j === 'Semua' || x.jenis === j);
+      [...new Set(spp.map((x) => x.psn))].sort().forEach((p) => {
+        const g = r.filter((x) => x.psn === p);
+        const sum = (rows, f) => rows.reduce((a, x) => a + Number(x[f] || 0), 0);
+        const vs = sum(g, 'nilai_diajukan_selesai');
+        const v2 = sum(g, 'nilai_disetujui');
+        const nilai = sum(g, 'nilai_diajukan');
+        const vadm = sum(g.filter((x) => x.status === 'ADM'), 'nilai_diajukan');
+        out.push({
+          jenis: j, psn: p,
+          jml_spp: sum(g, 'jml_spp'),
+          nilai_diajukan: nilai,
+          nilai_disetujui: v2,
+          selisih: vs - v2,
+          pct_disetujui: vs ? v2 / vs : null,
+          nilai_adm: vadm,
+          nilai_lain: nilai - vs - vadm,
+        });
+      });
+    });
+    return out;
+  },
+});
+
+dash.calc('per_bulan', {
+  title: 'Arus nilai per bulan',
+  description: 'Untuk tiap jenis (dan Semua), ruas (dan Semua) dan bulan: nilai diajukan menurut bulan SPP, dan nilai disetujui menurut bulan terbit RKP.',
+  inputs: ['spp', 'rkp'],
+  fn: (spp, rkp) => {
+    const out = [];
+    const ruasList = ['Semua', ...[...new Set(spp.map((x) => x.psn))].sort()];
+    const bulan = [...new Set([...spp.map((x) => x.bulan_spp), ...rkp.map((x) => x.bulan_rkp)])].sort();
+    ['Semua', 'Langsung', 'DTT', 'CoF'].forEach((j) => {
+      ruasList.forEach((p) => {
+        const okJ = (x) => (j === 'Semua' || x.jenis === j) && (p === 'Semua' || x.psn === p);
+        const a = spp.filter(okJ), b = rkp.filter(okJ);
+        bulan.forEach((m) => {
+          const am = a.filter((x) => x.bulan_spp === m), bm = b.filter((x) => x.bulan_rkp === m);
+          out.push({
+            jenis: j, ruas: p, bulan: m,
+            jml_spp: am.reduce((s, x) => s + Number(x.jml_spp), 0),
+            nilai_diajukan: am.reduce((s, x) => s + Number(x.nilai_diajukan), 0),
+            jml_rkp: bm.reduce((s, x) => s + Number(x.jml_spp), 0),
+            nilai_disetujui: bm.reduce((s, x) => s + Number(x.nilai_disetujui), 0),
+          });
+        });
+      });
+    });
+    return out;
+  },
+});
+</script>
+
+<script>
+window.LP = (() => {
+  const num = (v, d = 0) => Number(v).toLocaleString('id-ID', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const rp = (v) => {
+    if (v == null || isNaN(v)) return '—';
+    const a = Math.abs(v), s = v < 0 ? '−' : '';
+    if (a >= 1e12) return s + 'Rp' + num(a / 1e12, 2) + ' T';
+    if (a >= 1e9) return s + 'Rp' + num(a / 1e9, 2) + ' M';
+    if (a >= 1e6) return s + 'Rp' + num(a / 1e6, 1) + ' Jt';
+    return s + 'Rp' + num(a);
+  };
+  const full = (v) => (v == null || isNaN(v)) ? '—' : (v < 0 ? '−' : '') + num(Math.abs(v));
+  const pct = (v) => (v == null || isNaN(v)) ? '—' : num(v * 100, 1) + '%';
+  const axis = (v) => {
+    const a = Math.abs(v);
+    if (a >= 1e12) return num(v / 1e12, 1) + ' T';
+    if (a >= 1e9) return num(v / 1e9, 0) + ' M';
+    if (a >= 1e6) return num(v / 1e6, 0) + ' Jt';
+    return num(v);
+  };
+  const BULAN = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  const bln = (m) => BULAN[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(2, 4);
+  const waktu = (iso) => {
+    const d = new Date(iso);
+    if (isNaN(d)) return '—';
+    return d.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' WIB';
+  };
+  const jenis = () => dash.params().jenis || 'Semua';
+  const ruas = () => dash.params().ruas || 'Semua';
+  const where = (extra) => 'jenis=' + encodeURIComponent(jenis()) + '&ruas=' + encodeURIComponent(ruas()) + (extra || '');
+  const fail = (el) => { el.replaceChildren(); const d = document.createElement('div'); d.className = 'lp-fail'; d.textContent = 'Data gagal dimuat. Muat ulang halaman.'; el.appendChild(d); };
+  const css = (name) => getComputedStyle(document.querySelector('.lp')).getPropertyValue(name).trim();
+  const tip = (box) => {
+    let t = box.querySelector(':scope > .lp-tt');
+    if (!t) { t = document.createElement('div'); t.className = 'lp-tt'; box.appendChild(t); }
+    return {
+      show(ev, title, lines) {
+        t.replaceChildren();
+        const h = document.createElement('div'); h.className = 't'; h.textContent = title; t.appendChild(h);
+        lines.forEach(([c, name, val]) => {
+          const r = document.createElement('div'); r.className = 'r';
+          if (c) { const i = document.createElement('i'); i.style.background = c; r.appendChild(i); }
+          const s = document.createElement('span'); s.textContent = name + ': ' + val; r.appendChild(s); t.appendChild(r);
+        });
+        t.style.display = 'block';
+        const b = box.getBoundingClientRect();
+        let x = ev.clientX - b.left + 12, y = ev.clientY - b.top + 12;
+        const w = t.offsetWidth, hh = t.offsetHeight;
+        if (x + w > box.clientWidth) x = Math.max(0, ev.clientX - b.left - w - 12);
+        if (y + hh > box.clientHeight) y = Math.max(0, ev.clientY - b.top - hh - 12);
+        t.style.left = x + 'px'; t.style.top = y + 'px';
+      },
+      hide() { t.style.display = 'none'; },
+    };
+  };
+  const pilihRuas = (p) => dash.setParams({ ruas: !p || ruas() === p ? 'Semua' : p });
+  const legend = (el, items) => el.replaceChildren(...items.map(([c, name]) => {
+    const sp = document.createElement('span'); const i = document.createElement('i'); i.style.background = c; sp.append(i, document.createTextNode(name)); return sp;
+  }));
+  return { num, rp, full, pct, axis, bln, waktu, jenis, ruas, where, fail, css, tip, pilihRuas, legend };
+})();
+</script>
+
+<script>
+(() => {
+    const seg = document.getElementById('lp-jenis');
+  const sel = document.getElementById('lp-ruas');
+  const clear = document.getElementById('lp-clear');
+  seg.addEventListener('click', (e) => { const b = e.target.closest('button[data-j]'); if (b) dash.setParams({ jenis: b.dataset.j }); });
+  sel.addEventListener('change', () => dash.setParams({ ruas: sel.value || 'Semua' }));
+  clear.addEventListener('click', () => dash.setParams({ ruas: 'Semua' }));
+
+  dash.onData(() => {
+    const j = LP.jenis(), p = LP.ruas();
+    seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.j === j)));
+    clear.hidden = p === 'Semua';
+
+    const ps = dash.data('per_psn');
+    if (ps.status === 'ok') {
+      const names = ps.data.filter((x) => x.jenis === 'Semua').map((x) => x.psn);
+      if (sel.options.length !== names.length + 1) {
+        sel.replaceChildren(new Option('Semua ruas', 'Semua'), ...names.map((n) => new Option(n, n)));
+      }
+      sel.value = p;
+    }
+
+    const info = dash.data('info');
+    const asof = document.getElementById('lp-asof');
+    if (info.status === 'ok' && info.data[0]) {
+      asof.classList.remove('dash-skeleton');
+      const r = info.data[0];
+      asof.textContent = r.file;
+      asof.title = 'Sheet ' + r.sheet + ', file diubah ' + LP.waktu(r.file_diubah);
+      const ket = document.getElementById('lp-asof-ket');
+      if (ket) ket.textContent = 'Sheet ' + r.sheet + ', file diubah ' + LP.waktu(r.file_diubah) + '.';
+    } else if (info.status === 'error') { asof.classList.remove('dash-skeleton'); asof.textContent = '—'; }
+
+    const w = LP.where();
+    document.querySelectorAll('.lp [data-source="ringkasan"][data-field]').forEach((el) => { el.dataset.where = w; });
+    const d = dash.data('ringkasan');
+    const ids = ['lp-take', 'k-diajukan', 'k-setuju', 'k-selisih', 'k-adm'];
+    if (d.status !== 'ok') {
+      if (d.status === 'error') ids.forEach((id) => { const el = document.getElementById(id); el.classList.remove('dash-skeleton'); el.textContent = '—'; });
+      return;
+    }
+    ids.forEach((id) => document.getElementById(id).classList.remove('dash-skeleton'));
+    const r = d.data.find((x) => x.jenis === j && x.ruas === p);
+    if (!r) return;
+    const q = (s) => document.getElementById(s);
+    q('k-diajukan').textContent = LP.rp(r.nilai_diajukan);
+    q('k-spp').textContent = LP.num(r.jml_spp);
+    q('k-bid').textContent = LP.num(r.bidang);
+    q('k-setuju').textContent = LP.rp(r.nilai_disetujui);
+    q('k-pct').textContent = LP.pct(r.pct_disetujui);
+    q('k-selisih').textContent = LP.rp(r.selisih);
+    q('k-nol').textContent = LP.num(r.jml_disetujui_nol);
+    q('k-adm').textContent = LP.rp(r.nilai_adm);
+    q('k-admn').textContent = LP.num(r.jml_adm);
+    const lingkup = (p === 'Semua' ? 'Seluruh ruas' : 'Ruas ' + p) + (j === 'Semua' ? '' : ', jenis ' + j);
+    let s = lingkup + ': ' + LP.rp(r.nilai_diajukan) + ' diajukan dalam ' + LP.num(r.jml_spp) + ' SPP. ';
+    if (r.pct_disetujui != null) s += LP.rp(r.nilai_disetujui) + ' disetujui, ' + LP.pct(r.pct_disetujui) + ' dari nilai SPP yang selesai dinilai. ';
+    s += r.jml_adm ? LP.rp(r.nilai_adm) + ' dari ' + LP.num(r.jml_adm) + ' SPP masih diproses.' : 'Tidak ada SPP yang masih diproses.';
+    q('lp-take').textContent = s;
+  });
+})();
+</script>
+
+<script>
+(() => {
+  const box = document.getElementById('lp-steps');
+  dash.onData(() => {
+    const d = dash.data('ringkasan');
+    if (d.status === 'error') { box.classList.remove('dash-skeleton'); LP.fail(box); return; }
+    if (d.status !== 'ok') return;
+    box.classList.remove('dash-skeleton');
+    const r = d.data.find((x) => x.jenis === LP.jenis() && x.ruas === LP.ruas());
+    if (!r) return;
+    const steps = [['SPP masuk', 'jml_spp'], ['Selesai diproses', 'jml_selesai']];
+    const max = r.jml_spp || 1;
+    box.replaceChildren(...steps.map(([name, f], i) => {
+      const li = document.createElement('li'); li.className = 'lp-step';
+      const b = document.createElement('b'); b.textContent = String(i + 1); b.setAttribute('aria-hidden', 'true');
+      const n = document.createElement('span'); n.className = 'lp-step-name'; n.textContent = name;
+      const row = document.createElement('div'); row.className = 'lp-step-row';
+      const bar = document.createElement('div'); bar.className = 'lp-step-bar';
+      const fill = document.createElement('i'); fill.style.width = (r[f] / max * 100) + '%';
+      bar.appendChild(fill);
+      const v = document.createElement('span'); v.className = 'lp-step-val';
+      v.dataset.source = 'ringkasan'; v.dataset.field = f; v.dataset.where = LP.where();
+      v.textContent = LP.num(r[f]);
+      row.append(bar, v);
+      if (i) { const pc = document.createElement('span'); pc.className = 'lp-step-pct'; pc.textContent = '(' + LP.pct(r.jml_spp ? r[f] / r.jml_spp : null) + ')'; row.append(pc); }
+      li.append(b, n, row);
+      return li;
+    }));
+  });
+})();
+</script>
+
+<script>
+(() => {
+  const box = document.getElementById('lp-bul');
+  const leg = document.getElementById('lp-bul-leg');
+  dash.onData(() => {
+    const a = dash.data('per_bulan');
+    if (a.status === 'error') { box.classList.remove('dash-skeleton'); LP.fail(box); return; }
+    if (a.status !== 'ok') return;
+    box.classList.remove('dash-skeleton');
+    const rows = a.data.filter((x) => x.jenis === LP.jenis() && x.ruas === LP.ruas());
+    const cSet = LP.css('--lp-setuju'), cAju = LP.css('--lp-proses');
+    const series = [
+      { k: 'nilai_diajukan', n: 'jml_spp', name: 'Diajukan (bulan SPP)', color: cAju },
+      { k: 'nilai_disetujui', n: 'jml_rkp', name: 'Disetujui (bulan RKP)', color: cSet },
+    ];
+    LP.legend(leg, series.map((s) => [s.color, s.name]));
+    const months = rows.map((x) => x.bulan);
+    const W = Math.max(280, box.clientWidth), H = 288;
+    box.replaceChildren();
+    const tt = LP.tip(box);
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', 'Arus nilai per bulan');
+    const ymax = d3.max(rows, (r) => Math.max(r.nilai_diajukan, r.nilai_disetujui)) || 1;
+    const y = d3.scaleLinear([0, ymax], [H - 28, 12]).nice();
+    const ticks = y.ticks(5);
+    const meas = svg.append('text').attr('font-size', 11);
+    const lw = d3.max(ticks, (t) => { meas.text(LP.axis(t)); return meas.node().getComputedTextLength(); }) || 30;
+    meas.remove();
+    const ml = lw + 10;
+    const x0 = d3.scaleBand(months, [ml, W - 4]).paddingInner(0.28).paddingOuter(0.1);
+    const x1 = d3.scaleBand(series.map((s) => s.k), [0, x0.bandwidth()]).padding(0.1);
+    const bw = Math.min(28, x1.bandwidth());
+    svg.append('g').selectAll('line').data(ticks).join('line')
+      .attr('x1', ml).attr('x2', W - 4).attr('y1', (t) => y(t)).attr('y2', (t) => y(t)).style('stroke', 'var(--cds-chart-grid)');
+    svg.append('g').selectAll('text').data(ticks).join('text')
+      .attr('x', ml - 6).attr('y', (t) => y(t)).attr('dy', '0.32em').attr('text-anchor', 'end').attr('font-size', 11)
+      .style('fill', 'var(--color-fg-muted)').text((t) => LP.axis(t));
+    const step = Math.ceil(months.length / Math.max(1, Math.floor((W - ml) / 46)));
+    svg.append('g').selectAll('text').data(months.filter((m, i) => i % step === 0)).join('text')
+      .attr('x', (m) => x0(m) + x0.bandwidth() / 2).attr('y', H - 8).attr('text-anchor', 'middle').attr('font-size', 11)
+      .style('fill', 'var(--color-fg-muted)').text((m) => LP.bln(m));
+    svg.append('line').attr('x1', ml).attr('x2', W - 4).attr('y1', y(0)).attr('y2', y(0)).style('stroke', 'var(--cds-chart-axis)');
+    const g = svg.append('g').selectAll('g').data(rows).join('g').attr('transform', (r) => `translate(${x0(r.bulan)},0)`);
+    g.selectAll('rect.bar').data((r) => series.map((s) => ({ v: r[s.k], s }))).join('rect').attr('class', 'bar')
+      .attr('x', (d) => x1(d.s.k) + (x1.bandwidth() - bw) / 2).attr('width', bw)
+      .attr('y', (d) => y(d.v)).attr('height', (d) => Math.max(0, y(0) - y(d.v))).attr('rx', 3)
+      .style('fill', (d) => d.s.color);
+    g.append('rect').attr('x', 0).attr('width', x0.bandwidth()).attr('y', 0).attr('height', H - 28).style('fill', 'transparent')
+      .on('mousemove', (ev, r) => tt.show(ev, LP.bln(r.bulan), series.map((s) => [s.color, s.name, LP.rp(r[s.k]) + ', ' + LP.num(r[s.n]) + ' SPP'])))
+      .on('mouseleave', () => tt.hide());
+  });
+})();
+</script>
+
+<script>
+(() => {
+  const box = document.getElementById('lp-ruas-chart');
+  const leg = document.getElementById('lp-ruas-leg');
+  dash.onData(() => {
+    const d = dash.data('per_psn');
+    if (d.status === 'error') { box.classList.remove('dash-skeleton'); LP.fail(box); return; }
+    if (d.status !== 'ok') return;
+    box.classList.remove('dash-skeleton');
+    const segs = [
+      { k: 'nilai_disetujui', name: 'Disetujui', color: LP.css('--lp-setuju') },
+      { k: 'selisih', name: 'Selisih', color: LP.css('--lp-selisih') },
+      { k: 'nilai_adm', name: 'Masih diproses (ADM)', color: LP.css('--lp-proses') },
+      { k: 'nilai_lain', name: 'Belum dinilai (SPP diganti)', color: LP.css('--lp-lain') },
+    ];
+    const pick = LP.ruas();
+    const rows = d.data.filter((x) => x.jenis === LP.jenis() && x.nilai_diajukan > 0).sort((a, b) => b.nilai_diajukan - a.nilai_diajukan);
+    const used = segs.filter((s) => rows.some((r) => Math.max(0, r[s.k]) > 0));
+    LP.legend(leg, used.map((s) => [s.color, s.name]));
+    box.replaceChildren();
+    if (!rows.length) return;
+    const tt = LP.tip(box);
+    const W = Math.max(280, box.clientWidth), rh = 28, H = rows.length * rh + 8;
+    box.style.minHeight = H + 'px';
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', 'Nilai per ruas PSN');
+    const lw = Math.min(W * 0.38, 250);
+    const meas = svg.append('text').attr('font-size', 11);
+    const endW = d3.max(rows, (r) => { meas.text(LP.rp(r.nilai_diajukan)); return meas.node().getComputedTextLength(); }) || 50;
+    const fit = (t) => {
+      meas.text(t);
+      if (meas.node().getComputedTextLength() <= lw - 10) return t;
+      let s = t;
+      while (s.length > 4) { s = s.slice(0, -1); meas.text(s + '…'); if (meas.node().getComputedTextLength() <= lw - 10) return s + '…'; }
+      return s + '…';
+    };
+    const labels = rows.map((r) => fit(r.psn));
+    meas.remove();
+    const x = d3.scaleLinear([0, d3.max(rows, (r) => r.nilai_diajukan)], [lw, W - endW - 10]);
+    const g = svg.selectAll('g.row').data(rows).join('g').attr('class', 'row')
+      .attr('transform', (r, i) => `translate(0,${i * rh + 4})`)
+      .attr('tabindex', 0).attr('role', 'button')
+      .attr('aria-label', (r) => r.psn + ', ' + LP.rp(r.nilai_diajukan) + (pick === r.psn ? ', terpilih' : ''))
+      .style('opacity', (r) => pick === 'Semua' || pick === r.psn ? 1 : 0.35)
+      .on('click', (ev, r) => LP.pilihRuas(r.psn))
+      .on('keydown', (ev, r) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); LP.pilihRuas(r.psn); } });
+    g.append('rect').attr('x', 0).attr('width', W).attr('y', 0).attr('height', rh).style('fill', 'transparent');
+    g.append('text').attr('x', 0).attr('y', rh / 2 - 2).attr('dy', '0.32em').attr('font-size', 11)
+      .style('fill', 'var(--color-fg)').style('font-weight', (r) => pick === r.psn ? 600 : 400).text((r, i) => labels[i]);
+    g.each(function (r) {
+      let acc = 0;
+      const gg = d3.select(this);
+      used.forEach((s) => {
+        const v = Math.max(0, r[s.k]);
+        if (v <= 0) return;
+        gg.append('rect').attr('x', x(acc)).attr('width', Math.max(1, x(acc + v) - x(acc))).attr('y', 5).attr('height', rh - 14).style('fill', s.color);
+        acc += v;
+      });
+      gg.append('text').attr('x', x(acc) + 6).attr('y', rh / 2 - 2).attr('dy', '0.32em').attr('font-size', 11)
+        .style('fill', 'var(--color-fg-muted)').text(LP.rp(r.nilai_diajukan));
+    });
+    g.on('mousemove', (ev, r) => tt.show(ev, r.psn, [
+      [null, 'Diajukan', LP.rp(r.nilai_diajukan) + ', ' + LP.num(r.jml_spp) + ' SPP'],
+      ...used.map((s) => [s.color, s.name, LP.rp(r[s.k])]),
+      [null, '% disetujui', LP.pct(r.pct_disetujui)],
+    ])).on('mouseleave', () => tt.hide());
+  });
+})();
+</script>
+
+<script>
+(() => {
+  const tbl = document.getElementById('lp-tabel');
+  const body = tbl.querySelector('tbody');
+  let sortK = 'nilai_diajukan', dir = -1;
+  tbl.querySelector('thead').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-k]');
+    if (!b) return;
+    if (sortK === b.dataset.k) dir = -dir; else { sortK = b.dataset.k; dir = b.dataset.k === 'psn' ? 1 : -1; }
+    draw();
+  });
+  body.addEventListener('click', (e) => {
+    const tr = e.target.closest('tr[data-psn]');
+    if (tr) LP.pilihRuas(tr.dataset.psn);
+  });
+  body.addEventListener('keydown', (e) => {
+    const tr = e.target.closest('tr[data-psn]');
+    if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); LP.pilihRuas(tr.dataset.psn); }
+  });
+  const draw = () => {
+    const d = dash.data('per_psn');
+    tbl.querySelectorAll('th').forEach((th) => {
+      const b = th.querySelector('button');
+      th.setAttribute('aria-sort', b && b.dataset.k === sortK ? (dir > 0 ? 'ascending' : 'descending') : 'none');
+    });
+    if (d.status !== 'ok') { body.replaceChildren(); return; }
+    const j = LP.jenis(), pick = LP.ruas();
+    const rows = d.data.filter((x) => x.jenis === j && x.jml_spp > 0).sort((a, b) => {
+      const va = a[sortK], vb = b[sortK];
+      if (typeof va === 'string') return dir * va.localeCompare(vb, 'id');
+      return dir * ((va ?? -Infinity) - (vb ?? -Infinity));
+    });
+    body.replaceChildren(...rows.map((r) => {
+      const tr = document.createElement('tr');
+      tr.dataset.key = encodeURIComponent(r.jenis) + ',' + encodeURIComponent(r.psn);
+      tr.dataset.psn = r.psn;
+      tr.tabIndex = 0;
+      tr.setAttribute('aria-selected', String(pick === r.psn));
+      [[r.psn, ''], [LP.num(r.jml_spp), 'num'], [LP.full(r.nilai_diajukan), 'num'], [LP.full(r.nilai_disetujui), 'num'],
+        [LP.full(r.selisih), 'num'], [LP.pct(r.pct_disetujui), 'num'], [LP.full(r.nilai_adm), 'num']]
+        .forEach(([t, c]) => { const td = document.createElement('td'); td.className = c; td.textContent = t; tr.appendChild(td); });
+      return tr;
+    }));
+  };
+  dash.onData(draw);
+})();
+</script>
+
+<p class="lp-foot">Sumber: file Data Gerai terbaru di OneDrive, sheet 2026 (PDT 2). Angka dalam rupiah; T = triliun, M = miliar, Jt = juta. “Belum dinilai” = SPP berstatus Selesai tanpa nilai disetujui (SPP diganti).</p>
+</div>
+</body>
+</html>
